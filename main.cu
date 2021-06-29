@@ -2,6 +2,7 @@
 #include <cuda_runtime.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <math.h>
 #define BS 256
 #define T 16
 /*
@@ -11,7 +12,8 @@ void genMatrix(int** matrix, int N, int M) {
     int* matrix1 = new int[M*N];
     srand(1);
 	for(int i = 0; i < M*N; i++)
-		matrix1[i] = rand() % 1000 +1;
+		//matrix1[i] = rand() % 1000 +1;
+        matrix1[i] = 1;
     *matrix = matrix1;
 }
 
@@ -77,54 +79,46 @@ __global__ void kernelb(int *A, int *x, int *b, int N){
   */
 __global__ void kernelRed(int *A, int *x, int *b, int N){
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
-    int row, col;
-    __shared__ int ax[BS];
-	if (tid < N*N){
-        row = tid / N;
-        col = tid % N;
-        ax[threadIdx.x] = A[tid] * x[col];
-        __syncthreads();
-        if(threadIdx.x == 0){
-            int total = 0;
-            for(int i = 0; i < BS; i++){
-                total += ax[i];
+    if (tid < N){
+        __shared__ int ax[BS];
+        for(int i = 0; i < N; i++){
+            ax[threadIdx.x] = A[i*N + tid]*x[tid];
+            __syncthreads();
+            // for(int j = 1; j < log2(BS); j++){
+            //     if(threadIdx.x < (BS/(2**j))){
+            //         atomicAdd(ax[threadIdx.x % (BS/(2**j))],ax[threadIdx.x]);
+            //     }
+            // }
+            for (int size = BS/2; size>0; size/=2) {
+                if (threadIdx.x<size) atomicAdd(&ax[threadIdx.x], ax[threadIdx.x+size]);
+                __syncthreads();
             }
-            __syncthreads();
-            atomicAdd(&b[row], total);
-            __syncthreads();
+            if (threadIdx.x == 0){
+                atomicAdd(&b[i], ax[0]);
+            }
         }
-	}
+    }
 }
+
 
 /*
-__global__ void matvec_kernel(const T * __restrict__ dA, const T * __restrict__ dx, T * __restrict__ dy, const unsigned int nRows, const unsigned int nCols){
-    const unsigned int tid = threadIdx.x + blockIdx.x * blockDim.x;
+  *  Kernel inciso E
+  */
+// __global__ void kernelSM(int *A, int *x, int *b, int N){
+//     int tid = threadIdx.x + blockIdx.x * blockDim.x;
+//     __shared__ int vx[BS];
+// 	if (tid < N){
+//         vx[threadIdx.x] = x[tid];
+//         __syncthreads();
+//         int total = 0;
+//         for(int i = 0; i < BS; i++){
+//             atomicAdd(total, A[i+tid*BS]*vx[]);
+//             // atomicAdd(total, A[tid+i*N]*vx[tid]);
+//             // total += A[i]*vx[i];
+//         }
+// 	}
+// }
 
-    __shared__ T x_shared[BLOCK_SIZE];
-
-    T y_val = 0.0;
-
-    #pragma unroll
-    for (unsigned int m = 0; m < ((nCols + BLOCK_SIZE - 1)/ BLOCK_SIZE); ++m){
-        if ((m * BLOCK_SIZE + threadIdx.x) <  nCols) x_shared[threadIdx.x] = dx[threadIdx.x + m * BLOCK_SIZE];
-        else x_shared[threadIdx.x] = 0.f;
-        __syncthreads();
-
-        #pragma unroll
-        for (unsigned int e = 0; e < BLOCK_SIZE; ++e) {
-            // --- Column-major ordering - faster
-            y_val += dA[tid + (e + BLOCK_SIZE * m) * nRows] * x_shared[e];
-            // --- Row-major ordering - slower
-            //y_val += dA[tid * nCols + (e + BLOCK_SIZE * m)] * x_shared[e];
-        }
-
-        __syncthreads();
-    }
-
-    if (tid < nRows) dy[tid] = y_val;
-
-}
-*/
 
 int * suma(int * A, int * X, int N){
     int s;
@@ -241,16 +235,16 @@ int main(){
 
 	bhost = new int[M];
 	cudaMemcpy(bhost, b, M * sizeof(int), cudaMemcpyDeviceToHost);
-    printf("%d\n", bhost[1]);
-    //for(int i = 0; i < N*N; i++){
-    //    printf("%d ", bhost[i]);    
-    //}
-    //printf("\n-----------------------------------------------------------------------\n");
+    //printf("%d\n", bhost[1]);
+    for(int i = 0; i < 10; i++){
+       printf("%d ", bhost[i]);    
+    }
+    printf("\n-----------------------------------------------------------------------\n");
 	delete[] bhost;
 	cudaFree(b); cudaFree(A); cudaFree(x);
 
     //inciso D
-    gs = (int)ceil((float)N*N / bs);
+    gs = (int)ceil((float)N / bs);
     cudaMalloc((void**)&A, N * M * sizeof(int));
     cudaMalloc((void**)&x, N * sizeof(int));
     cudaMemcpy(A, Ahost, N * M * sizeof(int), cudaMemcpyHostToDevice);
@@ -261,7 +255,7 @@ int main(){
     cudaEventCreate(&ct1);
     cudaEventCreate(&ct2);
     cudaEventRecord(ct1);
-    printf("gs: %d  bs:%d\n", gs, bs);
+    //printf("gs: %d  bs:%d\n", gs, bs);
     kernelRed<<<gs, bs>>>(A, x, b, N);
     cudaEventRecord(ct2);
     cudaEventSynchronize(ct2);
@@ -270,11 +264,11 @@ int main(){
 
 	bhost = new int[M]();
 	cudaMemcpy(bhost, b, M * sizeof(int), cudaMemcpyDeviceToHost);
-    //for(int i = 0; i < N*N; i++){
-    ///    printf("%d ", bhost[i]);    
-    //}
-    //printf("\n-----------------------------------------------------------------------\n");
-    printf("%d\n", bhost[1]);
+    for(int i = 0; i < 10; i++){
+        printf("%d ", bhost[i]);    
+    }
+    printf("\n-----------------------------------------------------------------------\n");
+    // printf("%d\n", bhost[1]);
 	delete[] bhost;
 	cudaFree(b); cudaFree(A); cudaFree(x);
 
