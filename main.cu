@@ -131,13 +131,13 @@ __global__ void kernelSM(int *A,int *x, int *b, int N){
 /*
   *  Kernel inciso F
   */
-__constant__ int x[10000];
+__constant__ int X[10000];
 __global__ void kernelCM(int *A, int *b, int N){
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     if (tid < N){
         int total = 0;
         for(int i = 0; i < N; i++){
-            total += A[i+tid*N]*x[i];
+            total += A[i+tid*N]*X[i];
         }
         b[tid] = total;
     }
@@ -174,11 +174,15 @@ int main(){
     cudaEventRecord(ct2);
     cudaEventSynchronize(ct2);
     cudaEventElapsedTime(&dt, ct1, ct2);
-	//printf("a) Tiempo GPU: %f[ms]\n", dt);
+	printf("a) Tiempo GPU: %f[ms]\n", dt);
 
 	bhost = new int[M];
 
 	cudaMemcpy(bhost, b, M * sizeof(int), cudaMemcpyDeviceToHost);
+    for(int i = 0; i < 10; i++){
+       printf("%d ", bhost[i]);    
+    }
+    printf("\n-----------------------------------------------------------------------\n");
     //printf("%d\n", bhost[1]);
 	delete[] bhost;
     
@@ -201,10 +205,14 @@ int main(){
     cudaEventRecord(ct2);
     cudaEventSynchronize(ct2);
     cudaEventElapsedTime(&dt, ct1, ct2);
-	//printf("b) Tiempo GPU: %f[ms]\n", dt);
+	printf("b) Tiempo GPU: %f[ms]\n", dt);
 
 	bhost = new int[M];
 	cudaMemcpy(bhost, b, M * sizeof(int), cudaMemcpyDeviceToHost);
+    for(int i = 0; i < 10; i++){
+       printf("%d ", bhost[i]);    
+    }
+    printf("\n-----------------------------------------------------------------------\n");
     //printf("%d\n", bhost[1]);
 	delete[] bhost;
 	cudaFree(b); cudaFree(A); cudaFree(x);
@@ -303,7 +311,7 @@ int main(){
     //cudaMemcpy(x, xhost, N * sizeof(int), cudaMemcpyHostToDevice);
     cudaMalloc((void**)&b, M * sizeof(int));
 	cudaMemset(b, 0, M);
-    cudaMemcpyToSymbol(x, xhost, N*sizeof(int), 0, cudaMemcpyHostToDevice);
+    cudaMemcpyToSymbol(X, xhost, N*sizeof(int), 0, cudaMemcpyHostToDevice);
 
     cudaEventCreate(&ct1);
     cudaEventCreate(&ct2);
