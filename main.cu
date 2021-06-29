@@ -11,8 +11,7 @@ void genMatrix(int** matrix, int N, int M) {
     int* matrix1 = new int[M*N];
     srand(1);
 	for(int i = 0; i < M*N; i++)
-		//matrix1[i] = rand() % 1000 +1;
-        matrix1[i] = 1;
+		matrix1[i] = rand() % 1000 +1;
     *matrix = matrix1;
 }
 
@@ -76,102 +75,24 @@ __global__ void kernelb(int *A, int *x, int *b, int N){
  /*
   *  Kernel inciso D
   */
-__global__ void kernelRed(int *A, int *x, int *b, int N, int gs){ // Recordar que el gs no va acá
-    // opcion 1: borrar algunos syncthreads pa ver si cambia algo
-    // 
+__global__ void kernelRed(int *A, int *x, int *b, int N){
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     int row, col;
     __shared__ int ax[BS];
 	if (tid < N*N){
-        //gs = 40
-        //lt = 16
-        int limit_thread = N-(gs-1)*BS;
         row = tid / N;
         col = tid % N;
         ax[threadIdx.x] = A[tid] * x[col];
         __syncthreads();
         if(threadIdx.x == 0){
-            if(blockIdx.x%gs == gs-1){
-                //printf("%d,",blockIdx.x%gs);
-                int total = 0;
-                int i;
-                for(i = 0; i < limit_thread*(row+1); i++){
-                    total += ax[i];
-                }
-                //printf("%d \n",total);
-                atomicAdd(&b[row], total);
-                __syncthreads();
-
-                total = 0;
-                for(i = limit_thread*(row+1); i < BS; i++){
-                    total += ax[i];
-                }
-                //printf("%d \n",total);
-                atomicAdd(&b[row+1], total);
-                __syncthreads();
-
+            int total = 0;
+            for(int i = 0; i < BS; i++){
+                total += ax[i];
             }
-            else{
-                int total = 0;
-                for(int i = 0; i < BS; i++){
-                    total += ax[i];
-                }
-                atomicAdd(&b[row], total);
-                __syncthreads();
-            }
+            __syncthreads();
+            atomicAdd(&b[row], total);
+            __syncthreads();
         }
-
-
-
-        //printf("N: %d, BS: %d, blockIdx: %d, gs: %d \n, lt: %d",N, BS,blockIdx.x, gs, limit_thread);
-        // if(blockIdx.x%gs == gs-1){
-        //     row = tid / N;
-        //     col = tid % N;
-        //     ax[threadIdx.x] = A[tid] * x[col];
-        //     __syncthreads();
-        //     if(threadIdx.x == 0){
-        //         // printf("threadIdx: %d \n",threadIdx.x);
-        //         // printf("blockIdx: %d \n",blockIdx.x);
-        //         // printf("blockDim: %d \n",blockDim.x);
-        //         // printf("tid: %d \n",tid);
-        //         int total = 0;
-        //         int i;
-        //         for(i = 0; i < limit_thread; i++){
-        //             total += ax[i];
-        //         }
-        //         printf("%d \n",total);
-        //         atomicAdd(&b[row], total);
-        //         __syncthreads();
-
-        //         total = 0;
-        //         for(i = limit_thread; i < BS; i++){
-        //             total += ax[i];
-        //         }
-        //         printf("%d \n",total);
-        //         __syncthreads();
-        //         atomicAdd(&b[row+1], total);
-        //         __syncthreads();
-        //     }
-        //     // else{
-        //     //     __syncthreads();
-        //     // }
-        //     //if(threadIdx.x < limit_thread){
-        // }
-        // else{
-        //     row = tid / N;
-        //     col = tid % N;
-        //     ax[threadIdx.x] = A[tid] * x[col];
-        //     __syncthreads();
-        //     if(threadIdx.x == 0){
-        //         int total = 0;
-        //         for(int i = 0; i < BS; i++){
-        //             total += ax[i];
-        //         }
-        //         __syncthreads();
-        //         atomicAdd(&b[row], total);
-        //         __syncthreads();
-        //     }  
-        // }
 	}
 }
 
@@ -230,7 +151,7 @@ int main(){
 	float dt;
     int *A, *x, *b;
     int *Ahost, *xhost, *bhost;
-	int N =10000, M = 10000;
+	int N = 10000, M = 10000;
     int gs, bs = 256;
     gs = (int)ceil((float)N*N / bs);
 
@@ -320,17 +241,16 @@ int main(){
 
 	bhost = new int[M];
 	cudaMemcpy(bhost, b, M * sizeof(int), cudaMemcpyDeviceToHost);
-    //printf("%d\n", bhost[300]);
-    for(int i = 0; i < 10; i++){
-       printf("%d ", bhost[i]);
-    }
-    printf("\n-----------------------------------------------------------------------\n");
+    printf("%d\n", bhost[1]);
+    //for(int i = 0; i < N*N; i++){
+    //    printf("%d ", bhost[i]);    
+    //}
+    //printf("\n-----------------------------------------------------------------------\n");
 	delete[] bhost;
 	cudaFree(b); cudaFree(A); cudaFree(x);
 
     //inciso D
     gs = (int)ceil((float)N*N / bs);
-    int GS = (int)ceil((float)N / bs);
     cudaMalloc((void**)&A, N * M * sizeof(int));
     cudaMalloc((void**)&x, N * sizeof(int));
     cudaMemcpy(A, Ahost, N * M * sizeof(int), cudaMemcpyHostToDevice);
@@ -341,20 +261,20 @@ int main(){
     cudaEventCreate(&ct1);
     cudaEventCreate(&ct2);
     cudaEventRecord(ct1);
-    //printf("gs: %d  bs:%d\n", gs, bs);
-    kernelRed<<<gs, bs>>>(A, x, b, N, GS);
+    printf("gs: %d  bs:%d\n", gs, bs);
+    kernelRed<<<gs, bs>>>(A, x, b, N);
     cudaEventRecord(ct2);
     cudaEventSynchronize(ct2);
     cudaEventElapsedTime(&dt, ct1, ct2);
 	//printf("d) Tiempo GPU: %f[ms]\n", dt);
 
-	bhost = new int[M];
+	bhost = new int[M]();
 	cudaMemcpy(bhost, b, M * sizeof(int), cudaMemcpyDeviceToHost);
-    for(int i = 0; i < 10; i++){
-        printf("%d ", bhost[i]);
-    }
-    printf("\n-----------------------------------------------------------------------\n");
-    //printf("%d\n", bhost[300]);
+    //for(int i = 0; i < N*N; i++){
+    ///    printf("%d ", bhost[i]);    
+    //}
+    //printf("\n-----------------------------------------------------------------------\n");
+    printf("%d\n", bhost[1]);
 	delete[] bhost;
 	cudaFree(b); cudaFree(A); cudaFree(x);
 
