@@ -60,19 +60,6 @@ __global__ void kernelb(int *A, int *x, int *b, int N){
 	}
 }
 
-
-/*
-1 -> aij * xj
-
-1 2 3
-4 5 6
-7 8 9
-
-4
-5
-6
-
-*/
  /*
   *  Kernel inciso D
   */
@@ -84,11 +71,6 @@ __global__ void kernelRed(int *A, int *x, int *b, int N){
         for(int i = 0; i < N; i++){
             ax[threadIdx.x] = A[i*N + tid]*x[tid];
             __syncthreads();
-            // for(int j = 1; j < log2(BS); j++){
-            //     if(threadIdx.x < (BS/(2**j))){
-            //         atomicAdd(ax[threadIdx.x % (BS/(2**j))],ax[threadIdx.x]);
-            //     }
-            // }
             for (size = 256/2; size>0; size/=2) {
                 if (threadIdx.x<size) atomicAdd(&ax[threadIdx.x], ax[threadIdx.x+size]);
                 __syncthreads();
@@ -100,20 +82,10 @@ __global__ void kernelRed(int *A, int *x, int *b, int N){
     }
 }
 
-// bs = 2
-// 1 2 3 4         10
-// 4 2 3 4         x2
-// 2 2 3 4         x3
-// 6 2 3 4         x4
-
-
-
 /*
   *  Kernel inciso E
   */
 __global__ void kernelSM(int *A,int *x, int *b, int N){
-    //calcular por columna de A y por filas de x
-    //guardar el valor en variable local y al final hacer un atomicAdd
     int tid = threadIdx.x + blockIdx.x * blockDim.x;
     extern __shared__ int vx[];
 	if (tid < N){
