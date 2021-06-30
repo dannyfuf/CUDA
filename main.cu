@@ -27,13 +27,7 @@ __global__ void kernelA(int *A, int *x, int *b, int N){
         atomicAdd(&b[xtid], A[tid]*x[ytid]);
 	}
 }
-void comprobar(int *arr){
-    for(int i = 0; i < 10000; i++){
-        if(arr[i] != 10000){
-            printf("fallo: el numero es %d \n",arr[i]);
-        }
-    }
-}
+
  /*
   *  Kernel inciso B
   */
@@ -149,15 +143,8 @@ int main(){
 	printf("a) Tiempo GPU: %f[ms]\n", dt);
 
 	bhost = new int[M];
-
 	cudaMemcpy(bhost, b, M * sizeof(int), cudaMemcpyDeviceToHost);
-    for(int i = 0; i < 10; i++){
-       printf("%d ", bhost[i]);    
-    }
-    printf("\n-----------------------------------------------------------------------\n");
-    //printf("%d\n", bhost[1]);
 	delete[] bhost;
-    
 	cudaFree(b); cudaFree(A); cudaFree(x);
 
 
@@ -181,11 +168,6 @@ int main(){
 
 	bhost = new int[M];
 	cudaMemcpy(bhost, b, M * sizeof(int), cudaMemcpyDeviceToHost);
-    for(int i = 0; i < 10; i++){
-       printf("%d ", bhost[i]);    
-    }
-    printf("\n-----------------------------------------------------------------------\n");
-    //printf("%d\n", bhost[1]);
 	delete[] bhost;
 	cudaFree(b); cudaFree(A); cudaFree(x);
 
@@ -208,11 +190,6 @@ int main(){
 
 	bhost = new int[M];
 	cudaMemcpy(bhost, b, M * sizeof(int), cudaMemcpyDeviceToHost);
-    // printf("%d\n", bhost[1]);
-    for(int i = 0; i < 10; i++){
-       printf("%d ", bhost[i]);    
-    }
-    printf("\n-----------------------------------------------------------------------\n");
 	delete[] bhost;
 	cudaFree(b); cudaFree(A); cudaFree(x);
 
@@ -228,7 +205,7 @@ int main(){
     cudaEventCreate(&ct1);
     cudaEventCreate(&ct2);
     cudaEventRecord(ct1);
-    //printf("gs: %d  bs:%d\n", gs, bs);
+
     kernelRed<<<gs, bs, bs*sizeof(int)>>>(A, x, b, N);
     cudaEventRecord(ct2);
     cudaEventSynchronize(ct2);
@@ -237,11 +214,6 @@ int main(){
 
 	bhost = new int[M]();
 	cudaMemcpy(bhost, b, M * sizeof(int), cudaMemcpyDeviceToHost);
-    for(int i = 0; i < 10; i++){
-        printf("%d ", bhost[i]);    
-    }
-    printf("\n-----------------------------------------------------------------------\n");
-    // printf("%d\n", bhost[1]);
 	delete[] bhost;
 	cudaFree(b); cudaFree(A); cudaFree(x);
 
@@ -258,7 +230,6 @@ int main(){
     cudaEventCreate(&ct1);
     cudaEventCreate(&ct2);
     cudaEventRecord(ct1);
-    //printf("gs: %d  bs:%d\n", gs, bs);
     kernelSM<<<gs, bs, bs*sizeof(int)>>>(A, x, b, N);
     cudaEventRecord(ct2);
     cudaEventSynchronize(ct2);
@@ -267,20 +238,13 @@ int main(){
 
 	bhost = new int[M]();
 	cudaMemcpy(bhost, b, M * sizeof(int), cudaMemcpyDeviceToHost);
-    for(int i = 0; i < 10; i++){
-        printf("%d ", bhost[i]);    
-    }
-     printf("\n-----------------------------------------------------------------------\n");
-    // printf("%d\n", bhost[1]);
 	delete[] bhost;
 	cudaFree(b); cudaFree(A); cudaFree(x);
 
     //inciso F
     gs = (int)ceil((float)N / bs);
     cudaMalloc((void**)&A, N * M * sizeof(int));
-    //cudaMalloc((void**)&x, N * sizeof(int));
     cudaMemcpy(A, Ahost, N * M * sizeof(int), cudaMemcpyHostToDevice);
-    //cudaMemcpy(x, xhost, N * sizeof(int), cudaMemcpyHostToDevice);
     cudaMalloc((void**)&b, M * sizeof(int));
 	cudaMemset(b, 0, M);
     cudaMemcpyToSymbol(X, xhost, N*sizeof(int), 0, cudaMemcpyHostToDevice);
@@ -288,7 +252,7 @@ int main(){
     cudaEventCreate(&ct1);
     cudaEventCreate(&ct2);
     cudaEventRecord(ct1);
-    //printf("gs: %d  bs:%d\n", gs, bs);
+
     kernelCM<<<gs, bs>>>(A, b, N);
     cudaEventRecord(ct2);
     cudaEventSynchronize(ct2);
@@ -297,11 +261,6 @@ int main(){
 
 	bhost = new int[M]();
 	cudaMemcpy(bhost, b, M * sizeof(int), cudaMemcpyDeviceToHost);
-    for(int i = 0; i < 10; i++){
-        printf("%d ", bhost[i]);    
-    }
-    // printf("\n-----------------------------------------------------------------------\n");
-    // printf("%d\n", bhost[1]);
 	delete[] bhost;
 	cudaFree(b); cudaFree(A); cudaFree(x);
 
