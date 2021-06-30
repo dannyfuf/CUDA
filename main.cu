@@ -117,8 +117,8 @@ __global__ void kernelCM(int *A, int *b, int N){
 
 
 int main(){
-    clock_t t1, t2;
-	double ms;
+    //clock_t t1, t2;
+	//double ms;
 	cudaEvent_t ct1, ct2;
 	float dt;
     int *A, *x, *b;
