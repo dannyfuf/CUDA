@@ -37,7 +37,7 @@ def TXTtoRGB(name):
 # Solo se aceptan imagenes en formato png
 
 # Generar archivos de texto:
-RGBtoTXT('imgG')
+#RGBtoTXT('imgG')
 #RGBtoTXT('imgP')
 
 # Generar imagenes
