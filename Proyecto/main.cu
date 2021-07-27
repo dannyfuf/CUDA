@@ -13,8 +13,6 @@ using namespace std;
 #define X 3
 #define Y 3
 #define PYTHON_COMMAND 0 // 0 si el comando de python NO lleva el 3. cualquier otro valor si lo lleva.
-extern int EME;
-extern int ENE;
 
 //
 // Funcion que ejecuta el comando de python para convertir la imagen en formato txt
@@ -23,10 +21,12 @@ extern int ENE;
 //
 int TXTtoRGB(){
     if (PYTHON_COMMAND == 0){
+        cout << "Reconstruyendo Imagen..." << endl;
         system("python TXTtoRGB.py");
         return 1;
     }
     else if(system("python3 TXTtoRGB.py")){
+        cout << "Reconstruyendo Imagen..." << endl;
         return 1;
     }
     else{
@@ -92,21 +92,22 @@ void Read(float** R, float** G, float** B, int *M, int *N,
     *R = R1; *G = G1; *B = B1;
 }
 
-// __global__ void kernelStream(float* R, float* Rx, float *Ry, int M, int N, int Mout, int Nout, int *k1, int *k2){
-// 	int tid = threadIdx.x + blockDim.x * blockIdx.x;
-// 	if (tid < (Mout*Nout)/4){
-//         float v1 = 0, v2 = 0;
-//         int fila = tid + (tid/Nout)*2;
-//         for(int i = 0; i<Y ; i++){
-//             for(int j = 0; j<X ; j++){
-//                 v1 += R[j+i*N+fila]*k1[j+i*Y];
-//                 v2 += R[j+i*N+fila]*k2[j+i*Y];
-//             }
-//         }
-//         Rx[tid] = v1;
-//         Ry[tid] = v2;
-//     }
-// }
+__global__ void kernelStream(float* R, float* Rx, float *Ry, int M, int N, int Mout, int Nout, int *k1, int *k2, int tam, int stream){
+	int tid = threadIdx.x + blockDim.x * blockIdx.x;
+    int tamano = (int)(M/4)*N;;
+	if (tid < tam){
+        float v1 = 0, v2 = 0;
+        int fila = tid + (tid/Nout)*2;
+        for(int i = 0; i<Y ; i++){
+            for(int j = 0; j<X ; j++){
+                v1 += R[j+i*N+fila+tamano*stream]*k1[j+i*Y];
+                v2 += R[j+i*N+fila+tamano*stream]*k2[j+i*Y];
+            }
+        }
+        Rx[tid] = v1;
+        Ry[tid] = v2;
+    }
+}
 
 
 __global__ void kernelConvolucion(float* R, float* Rx, float *Ry, int M, int N, int Mout, int Nout, int *k1, int *k2){
@@ -219,7 +220,7 @@ void callKernelFila(float * Rhost, int N, int M, int Mout, int Nout, int * k1, i
     cudaEventRecord(ct2);
     cudaEventSynchronize(ct2);
     cudaEventElapsedTime(&dt, ct1, ct2);
-    cout << "Tiempo GPU: " << dt << "[ms]" << endl;
+    cout << "Tiempo GPU una hebra por fila: " << dt << "[ms]" << endl;
 
     Rxhost = new float[Mout*Nout];
 	Ryhost = new float[Mout*Nout];
@@ -282,7 +283,7 @@ void callKernelConv(float * Rhost, int N, int M, int Mout, int Nout, int * k1, i
     cudaEventRecord(ct2);
     cudaEventSynchronize(ct2);
     cudaEventElapsedTime(&dt, ct1, ct2);
-    cout << "Tiempo GPU: " << dt << "[ms]" << endl;
+    cout << "Tiempo GPU una hebra por convolucion: " << dt << "[ms]" << endl;
 
     Rxhost = new float[Mout*Nout];
 	Ryhost = new float[Mout*Nout];
@@ -296,57 +297,91 @@ void callKernelConv(float * Rhost, int N, int M, int Mout, int Nout, int * k1, i
     copiar(Rfinal, Gfinal, Bfinal, Rxhost, Ryhost, Mout, Nout);
 }
 
-// void callKernelStream(float * Rhost, int N, int M, int Mout, int Nout, int * k1, int * k2){
-//     cudaStream_t stream1, stream2, stream3, stream4;
-//     float *Rdev, *Rx, *Ry, *Rxhost, *Ryhost, dt;
-//     cudaEvent_t ct1, ct2;
-//     int *k1dev, *k2dev;
+void callKernelStream(float * Rhost, int N, int M, int Mout, int Nout, int * k1, int * k2){
+    cudaStream_t stream1, stream2, stream3, stream4;
+    float *Rdev, *Rxhost, *Ryhost, dt;
+    float *RxStream1, *RxStream2, *RxStream3, *RxStream4;
+    float *RyStream1, *RyStream2, *RyStream3, *RyStream4;
+    cudaEvent_t ct1, ct2;
+    int *k1dev, *k2dev;
+
+    Rxhost = new float[Mout*Nout];
+    Ryhost = new float[Mout*Nout];
+
+    int cantStream = 4;
+    int GS = (int)ceil((float) (Mout/cantStream)*Nout / BS);
+    int GS4 = (int)ceil((float) ((Mout+Mout%cantStream)/cantStream)*Nout / BS);
+
+    cudaStreamCreate(&stream1);
+    cudaStreamCreate(&stream2);
+    cudaStreamCreate(&stream3);
+    cudaStreamCreate(&stream4);
+
+    int size = (int)(Mout/cantStream)*Nout;
+    int size4 = (int)((Mout+Mout%cantStream)/cantStream)*Nout;
+    cudaMalloc((void **)&RxStream1, size * sizeof(float));
+    cudaMalloc((void **)&RyStream1, size * sizeof(float));
+
+    cudaMalloc((void **)&RxStream2, size * sizeof(float));
+    cudaMalloc((void **)&RyStream2, size * sizeof(float));
     
-//     int cantStream = 4;
-//     int GS = (int)ceil((float) (Mout/cantStream)*Nout / BS); // S1 - S2 - S3 - S4+7%4
-//     int GS4 = (int)ceil((float) ((Mout+Mout%cantStream)/cantStream)*Nout / BS);
+    cudaMalloc((void **)&RxStream3, size * sizeof(float));
+    cudaMalloc((void **)&RyStream3, size * sizeof(float));
 
-//     cudaStreamCreate(&stream1);
-//     cudaStreamCreate(&stream2);
-//     cudaStreamCreate(&stream3);
-//     cudaStreamCreate(&stream4);
+    cudaMalloc((void **)&RxStream4, size4 * sizeof(float));
+    cudaMalloc((void **)&RyStream4, size4 * sizeof(float));
+    
 
-//     cudaMalloc((void**)&Rdev, M * N * sizeof(float));
-//     cudaMemcpy(Rdev, Rhost, M * N * sizeof(float), cudaMemcpyHostToDevice);
-//     cudaCheckError(1);
+    // copiar la imagen completa a memoria de gpu
+    cudaMalloc((void **)&Rdev, M * N * sizeof(float));
+    cudaMemcpy(Rdev, Rhost, M * N * sizeof(float), cudaMemcpyHostToDevice);
 
-//     cudaMalloc((void**)&k1dev, X * Y * sizeof(int));
-//     cudaMalloc((void**)&k2dev, X * Y * sizeof(int));
-//     cudaMemcpy(k1dev, k1, X * Y * sizeof(int), cudaMemcpyHostToDevice);
-//     cudaMemcpy(k2dev, k2, X * Y * sizeof(int), cudaMemcpyHostToDevice);
-//     cudaCheckError(2);
+    // copiar el kernel de convolucion a memoria de gpu
+    cudaMalloc((void **)&k1dev, X * Y * sizeof(float));
+    cudaMalloc((void **)&k2dev, X * Y * sizeof(float));
+    cudaMemcpy(k1dev, k1, M * N * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(k2dev, k2, M * N * sizeof(float), cudaMemcpyHostToDevice);
 
-//     cudaMalloc((void**)&Rx, Mout * Nout * sizeof(float));
-//     cudaMalloc((void**)&Ry, Mout * Nout * sizeof(float));
-//     cudaCheckError(3);
+    cudaMalloc((void**)&k1dev, X * Y * sizeof(int));
+    cudaMalloc((void**)&k2dev, X * Y * sizeof(int));
+    cudaMemcpy(k1dev, k1, X * Y * sizeof(int), cudaMemcpyHostToDevice);
+    cudaMemcpy(k2dev, k2, X * Y * sizeof(int), cudaMemcpyHostToDevice);
 
-//     cudaEventCreate(&ct1);
-//     cudaEventCreate(&ct2);
-//     cudaEventRecord(ct1);
+    cudaEventCreate(&ct1);
+    cudaEventCreate(&ct2);
+    cudaEventRecord(ct1);
+    
+    //stream 1
+    kernelStream<<<GS, BS, 0, stream1>>>(Rdev, RxStream1, RyStream1, M, N, Mout, Nout, k1dev, k2dev, size, 0);
+    cudaMemcpyAsync(&Rxhost[0], RxStream1, size*sizeof(float), cudaMemcpyDeviceToHost, stream1);
+    cudaMemcpyAsync(&Ryhost[0], RyStream1, size*sizeof(float), cudaMemcpyDeviceToHost, stream1);
+    
+    //stream 2
+    kernelStream<<<GS, BS, 0, stream2>>>(Rdev, RxStream2, RyStream2, M, N, Mout, Nout, k1dev, k2dev, size, 1);
+    cudaMemcpyAsync(&Rxhost[size], RxStream2, size*sizeof(float), cudaMemcpyDeviceToHost, stream2);
+    cudaMemcpyAsync(&Ryhost[size], RyStream2, size*sizeof(float), cudaMemcpyDeviceToHost, stream2);
+    
+    //stream 3
+    kernelStream<<<GS, BS, 0, stream3>>>(Rdev, RxStream3, RyStream3, M, N, Mout, Nout, k1dev, k2dev, size, 2);
+    cudaMemcpyAsync(&Rxhost[size*2], RxStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
+    cudaMemcpyAsync(&Ryhost[size*2], RyStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
 
-//     kernelConvolucion<<<GS, BS>>>(Rdev, Rx, Ry, M, N, Mout, Nout, k1dev, k2dev);
-//     cudaCheckError(4);
-//     cudaEventRecord(ct2);
-//     cudaEventSynchronize(ct2);
-//     cudaEventElapsedTime(&dt, ct1, ct2);
-//     cout << "Tiempo GPU: " << dt << "[ms]" << endl;
+    //stream 4
+    kernelStream<<<GS4, BS, 0, stream4>>>(Rdev, RxStream4, RyStream4, M, N, Mout, Nout, k1dev, k2dev, size4, 3);
+    cudaMemcpyAsync(&Rxhost[size*3], RxStream4, size4*sizeof(float), cudaMemcpyDeviceToHost, stream4);
+    cudaMemcpyAsync(&Ryhost[size*3], RyStream4, size4*sizeof(float), cudaMemcpyDeviceToHost, stream4);
+    
+    cudaEventRecord(ct2);
+    cudaEventSynchronize(ct2);
+    cudaEventElapsedTime(&dt, ct1, ct2);
+	printf("Tiempo GPU Streams: %f[ms]\n", dt);
 
-//     Rxhost = new float[Mout*Nout];
-// 	Ryhost = new float[Mout*Nout];
-//     cudaMemcpy(Rxhost, Rx, Mout * Nout * sizeof(float), cudaMemcpyDeviceToHost);
-// 	cudaMemcpy(Ryhost, Ry, Mout * Nout * sizeof(float), cudaMemcpyDeviceToHost);
-//     cudaCheckError(5);
-
-//     float *Rfinal= new float[Mout*Nout];
-//     float *Gfinal = new float[Mout*Nout];
-//     float *Bfinal = new float[Mout*Nout];
-//     copiar(Rfinal, Gfinal, Bfinal, Rxhost, Ryhost, Mout, Nout);
-// }
+    float *Rfinal= new float[Mout*Nout];
+    float *Gfinal = new float[Mout*Nout];
+    float *Bfinal = new float[Mout*Nout];
+    copiar(Rfinal, Gfinal, Bfinal, Rxhost, Ryhost, Mout, Nout);
+    
+}
 
 int main(){
 
@@ -359,8 +394,6 @@ int main(){
     Nout = N - 2;
 	Mout = M - 2;
     //probar esto
-    EME = M;
-    ENE = N;
     
     int *k1{ new int[9]{ -1, 0, 1, -2, 0, 2, -1, 0, 1 } };
     int *k2{ new int[9]{ -1, -2, -1, 0, 0, 0, 1, 2, 1 } };
@@ -371,11 +404,15 @@ int main(){
 
     // llamada a la implementación del kernel usando una hebra por fila. 
     callKernelFila(Rhost, N, M, Mout, Nout, k1, k2);
-    TXTtoRGB();
+    //TXTtoRGB();
 
     // llamada a la implementación del kernel usando una hebra por fila. 
-    // callKernelConv(Rhost, N, M, Mout, Nout, k1, k2);
-    // TXTtoRGB();
+    callKernelConv(Rhost, N, M, Mout, Nout, k1, k2);
+    //TXTtoRGB();
+
+    // llamada al kernel usando streams y un kernel por calculo.
+    callKernelStream(Rhost, N, M, Mout, Nout, k1, k2);
+    //TXTtoRGB();
 
     return 0;
 }
