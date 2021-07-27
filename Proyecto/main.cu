@@ -12,6 +12,7 @@ using namespace std;
 #define BS 256
 #define X 3
 #define Y 3
+#define cantStream 4
 #define PYTHON_COMMAND 0 // 0 si el comando de python NO lleva el 3. cualquier otro valor si lo lleva.
 
 //
@@ -94,7 +95,7 @@ void Read(float** R, float** G, float** B, int *M, int *N,
 
 __global__ void kernelStream(float* R, float* Rx, float *Ry, int M, int N, int Mout, int Nout, int *k1, int *k2, int tam, int stream){
 	int tid = threadIdx.x + blockDim.x * blockIdx.x;
-    int tamano = (int)(M/4)*N;;
+    int tamano = (int)(M/cantStream)*N;;
 	if (tid < tam){
         float v1 = 0, v2 = 0;
         int fila = tid + (tid/Nout)*2;
@@ -308,7 +309,7 @@ void callKernelStream(float * Rhost, int N, int M, int Mout, int Nout, int * k1,
     Rxhost = new float[Mout*Nout];
     Ryhost = new float[Mout*Nout];
 
-    int cantStream = 4;
+    // int cantStream = 4;
     int GS = (int)ceil((float) (Mout/cantStream)*Nout / BS);
     int GS4 = (int)ceil((float) ((Mout+Mout%cantStream)/cantStream)*Nout / BS);
 
@@ -353,28 +354,42 @@ void callKernelStream(float * Rhost, int N, int M, int Mout, int Nout, int * k1,
     
     //stream 1
     kernelStream<<<GS, BS, 0, stream1>>>(Rdev, RxStream1, RyStream1, M, N, Mout, Nout, k1dev, k2dev, size, 0);
-    cudaMemcpyAsync(&Rxhost[0], RxStream1, size*sizeof(float), cudaMemcpyDeviceToHost, stream1);
-    cudaMemcpyAsync(&Ryhost[0], RyStream1, size*sizeof(float), cudaMemcpyDeviceToHost, stream1);
+    //cudaMemcpyAsync(&Rxhost[0], RxStream1, size*sizeof(float), cudaMemcpyDeviceToHost, stream1);
+    //cudaMemcpyAsync(&Ryhost[0], RyStream1, size*sizeof(float), cudaMemcpyDeviceToHost, stream1);
     
     //stream 2
     kernelStream<<<GS, BS, 0, stream2>>>(Rdev, RxStream2, RyStream2, M, N, Mout, Nout, k1dev, k2dev, size, 1);
-    cudaMemcpyAsync(&Rxhost[size], RxStream2, size*sizeof(float), cudaMemcpyDeviceToHost, stream2);
-    cudaMemcpyAsync(&Ryhost[size], RyStream2, size*sizeof(float), cudaMemcpyDeviceToHost, stream2);
+    //cudaMemcpyAsync(&Rxhost[size], RxStream2, size*sizeof(float), cudaMemcpyDeviceToHost, stream2);
+    //cudaMemcpyAsync(&Ryhost[size], RyStream2, size*sizeof(float), cudaMemcpyDeviceToHost, stream2);
     
     //stream 3
     kernelStream<<<GS, BS, 0, stream3>>>(Rdev, RxStream3, RyStream3, M, N, Mout, Nout, k1dev, k2dev, size, 2);
-    cudaMemcpyAsync(&Rxhost[size*2], RxStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
-    cudaMemcpyAsync(&Ryhost[size*2], RyStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
+    //cudaMemcpyAsync(&Rxhost[size*2], RxStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
+    //cudaMemcpyAsync(&Ryhost[size*2], RyStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
 
     //stream 4
     kernelStream<<<GS4, BS, 0, stream4>>>(Rdev, RxStream4, RyStream4, M, N, Mout, Nout, k1dev, k2dev, size4, 3);
-    cudaMemcpyAsync(&Rxhost[size*3], RxStream4, size4*sizeof(float), cudaMemcpyDeviceToHost, stream4);
-    cudaMemcpyAsync(&Ryhost[size*3], RyStream4, size4*sizeof(float), cudaMemcpyDeviceToHost, stream4);
+    //cudaMemcpyAsync(&Rxhost[size*3], RxStream4, size4*sizeof(float), cudaMemcpyDeviceToHost, stream4);
+    //cudaMemcpyAsync(&Ryhost[size*3], RyStream4, size4*sizeof(float), cudaMemcpyDeviceToHost, stream4);
     
+    cudaDeviceSynchronize();
+
     cudaEventRecord(ct2);
     cudaEventSynchronize(ct2);
     cudaEventElapsedTime(&dt, ct1, ct2);
 	printf("Tiempo GPU Streams: %f[ms]\n", dt);
+
+    cudaMemcpyAsync(&Rxhost[0], RxStream1, size*sizeof(float), cudaMemcpyDeviceToHost, stream1);
+    cudaMemcpyAsync(&Ryhost[0], RyStream1, size*sizeof(float), cudaMemcpyDeviceToHost, stream1);
+
+    cudaMemcpyAsync(&Rxhost[size], RxStream2, size*sizeof(float), cudaMemcpyDeviceToHost, stream2);
+    cudaMemcpyAsync(&Ryhost[size], RyStream2, size*sizeof(float), cudaMemcpyDeviceToHost, stream2);
+
+    cudaMemcpyAsync(&Rxhost[size*2], RxStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
+    cudaMemcpyAsync(&Ryhost[size*2], RyStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
+    
+    cudaMemcpyAsync(&Rxhost[size*3], RxStream4, size4*sizeof(float), cudaMemcpyDeviceToHost, stream4);
+    cudaMemcpyAsync(&Ryhost[size*3], RyStream4, size4*sizeof(float), cudaMemcpyDeviceToHost, stream4);
 
     float *Rfinal= new float[Mout*Nout];
     float *Gfinal = new float[Mout*Nout];
@@ -403,7 +418,7 @@ int main(){
     // TXTtoRGB();
 
     // llamada a la implementación del kernel usando una hebra por fila. 
-    callKernelFila(Rhost, N, M, Mout, Nout, k1, k2);
+    //callKernelFila(Rhost, N, M, Mout, Nout, k1, k2);
     //TXTtoRGB();
 
     // llamada a la implementación del kernel usando una hebra por fila. 
@@ -412,7 +427,7 @@ int main(){
 
     // llamada al kernel usando streams y un kernel por calculo.
     callKernelStream(Rhost, N, M, Mout, Nout, k1, k2);
-    //TXTtoRGB();
+    TXTtoRGB();
 
     return 0;
 }
