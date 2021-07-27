@@ -39,7 +39,7 @@ def TXTtoRGB(name):
 # Generar archivos de texto:
 #RGBtoTXT('imgG')
 #RGBtoTXT('imgP')
-RGBtoTXT('img1')
+RGBtoTXT('mono')
 
 # Generar imagenes
 #TXTtoRGB('salida')

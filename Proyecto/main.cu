@@ -12,7 +12,7 @@ using namespace std;
 #define BS 256
 #define X 3
 #define Y 3
-#define cantStream 4
+#define cantStream 6
 #define PYTHON_COMMAND 0 // 0 si el comando de python NO lleva el 3. cualquier otro valor si lo lleva.
 
 //
@@ -94,8 +94,8 @@ void Read(float** R, float** G, float** B, int *M, int *N,
 }
 
 __global__ void kernelStream(float* R, float* Rx, float *Ry, int M, int N, int Mout, int Nout, int *k1, int *k2, int tam, int stream){
-	int tid = threadIdx.x + blockDim.x * blockIdx.x;
-    int tamano = (int)(M/cantStream)*N;;
+    int tid = threadIdx.x + blockDim.x * blockIdx.x;// 
+    int tamano = (int)(M/cantStream)*N;
 	if (tid < tam){
         float v1 = 0, v2 = 0;
         int fila = tid + (tid/Nout)*2;
@@ -299,10 +299,10 @@ void callKernelConv(float * Rhost, int N, int M, int Mout, int Nout, int * k1, i
 }
 
 void callKernelStream(float * Rhost, int N, int M, int Mout, int Nout, int * k1, int * k2){
-    cudaStream_t stream1, stream2, stream3, stream4;
+    cudaStream_t stream1, stream2, stream3, stream4, stream5, stream6;
     float *Rdev, *Rxhost, *Ryhost, dt;
-    float *RxStream1, *RxStream2, *RxStream3, *RxStream4;
-    float *RyStream1, *RyStream2, *RyStream3, *RyStream4;
+    float *RxStream1, *RxStream2, *RxStream3, *RxStream4, *RxStream5, *RxStream6;
+    float *RyStream1, *RyStream2, *RyStream3, *RyStream4, *RyStream5, *RyStream6;
     cudaEvent_t ct1, ct2;
     int *k1dev, *k2dev;
 
@@ -317,9 +317,12 @@ void callKernelStream(float * Rhost, int N, int M, int Mout, int Nout, int * k1,
     cudaStreamCreate(&stream2);
     cudaStreamCreate(&stream3);
     cudaStreamCreate(&stream4);
+    cudaStreamCreate(&stream5);
+    cudaStreamCreate(&stream6);
 
     int size = (int)(Mout/cantStream)*Nout;
     int size4 = (int)((Mout+Mout%cantStream)/cantStream)*Nout;
+    
     cudaMalloc((void **)&RxStream1, size * sizeof(float));
     cudaMalloc((void **)&RyStream1, size * sizeof(float));
 
@@ -329,8 +332,14 @@ void callKernelStream(float * Rhost, int N, int M, int Mout, int Nout, int * k1,
     cudaMalloc((void **)&RxStream3, size * sizeof(float));
     cudaMalloc((void **)&RyStream3, size * sizeof(float));
 
-    cudaMalloc((void **)&RxStream4, size4 * sizeof(float));
-    cudaMalloc((void **)&RyStream4, size4 * sizeof(float));
+    cudaMalloc((void **)&RxStream4, size * sizeof(float));
+    cudaMalloc((void **)&RyStream4, size * sizeof(float));
+
+    cudaMalloc((void **)&RxStream5, size * sizeof(float));
+    cudaMalloc((void **)&RyStream5, size * sizeof(float));
+
+    cudaMalloc((void **)&RxStream6, size4 * sizeof(float));
+    cudaMalloc((void **)&RyStream6, size4 * sizeof(float));
     
 
     // copiar la imagen completa a memoria de gpu
@@ -340,38 +349,25 @@ void callKernelStream(float * Rhost, int N, int M, int Mout, int Nout, int * k1,
     // copiar el kernel de convolucion a memoria de gpu
     cudaMalloc((void **)&k1dev, X * Y * sizeof(float));
     cudaMalloc((void **)&k2dev, X * Y * sizeof(float));
-    cudaMemcpy(k1dev, k1, M * N * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(k2dev, k2, M * N * sizeof(float), cudaMemcpyHostToDevice);
-
-    cudaMalloc((void**)&k1dev, X * Y * sizeof(int));
-    cudaMalloc((void**)&k2dev, X * Y * sizeof(int));
-    cudaMemcpy(k1dev, k1, X * Y * sizeof(int), cudaMemcpyHostToDevice);
-    cudaMemcpy(k2dev, k2, X * Y * sizeof(int), cudaMemcpyHostToDevice);
-
+    cudaMemcpy(k1dev, k1, X * Y * sizeof(float), cudaMemcpyHostToDevice);
+    cudaMemcpy(k2dev, k2, X * Y * sizeof(float), cudaMemcpyHostToDevice);
     cudaEventCreate(&ct1);
     cudaEventCreate(&ct2);
     cudaEventRecord(ct1);
     
     //stream 1
     kernelStream<<<GS, BS, 0, stream1>>>(Rdev, RxStream1, RyStream1, M, N, Mout, Nout, k1dev, k2dev, size, 0);
-    //cudaMemcpyAsync(&Rxhost[0], RxStream1, size*sizeof(float), cudaMemcpyDeviceToHost, stream1);
-    //cudaMemcpyAsync(&Ryhost[0], RyStream1, size*sizeof(float), cudaMemcpyDeviceToHost, stream1);
-    
     //stream 2
     kernelStream<<<GS, BS, 0, stream2>>>(Rdev, RxStream2, RyStream2, M, N, Mout, Nout, k1dev, k2dev, size, 1);
-    //cudaMemcpyAsync(&Rxhost[size], RxStream2, size*sizeof(float), cudaMemcpyDeviceToHost, stream2);
-    //cudaMemcpyAsync(&Ryhost[size], RyStream2, size*sizeof(float), cudaMemcpyDeviceToHost, stream2);
-    
     //stream 3
     kernelStream<<<GS, BS, 0, stream3>>>(Rdev, RxStream3, RyStream3, M, N, Mout, Nout, k1dev, k2dev, size, 2);
-    //cudaMemcpyAsync(&Rxhost[size*2], RxStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
-    //cudaMemcpyAsync(&Ryhost[size*2], RyStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
-
     //stream 4
-    kernelStream<<<GS4, BS, 0, stream4>>>(Rdev, RxStream4, RyStream4, M, N, Mout, Nout, k1dev, k2dev, size4, 3);
-    //cudaMemcpyAsync(&Rxhost[size*3], RxStream4, size4*sizeof(float), cudaMemcpyDeviceToHost, stream4);
-    //cudaMemcpyAsync(&Ryhost[size*3], RyStream4, size4*sizeof(float), cudaMemcpyDeviceToHost, stream4);
-    
+    kernelStream<<<GS, BS, 0, stream4>>>(Rdev, RxStream4, RyStream4, M, N, Mout, Nout, k1dev, k2dev, size, 3);
+    //stream 5
+    kernelStream<<<GS, BS, 0, stream5>>>(Rdev, RxStream5, RyStream5, M, N, Mout, Nout, k1dev, k2dev, size, 4);
+    //stream 6
+    kernelStream<<<GS4, BS, 0, stream6>>>(Rdev, RxStream6, RyStream6, M, N, Mout, Nout, k1dev, k2dev, size4, 5);
+
     cudaDeviceSynchronize();
 
     cudaEventRecord(ct2);
@@ -388,8 +384,14 @@ void callKernelStream(float * Rhost, int N, int M, int Mout, int Nout, int * k1,
     cudaMemcpyAsync(&Rxhost[size*2], RxStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
     cudaMemcpyAsync(&Ryhost[size*2], RyStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
     
-    cudaMemcpyAsync(&Rxhost[size*3], RxStream4, size4*sizeof(float), cudaMemcpyDeviceToHost, stream4);
-    cudaMemcpyAsync(&Ryhost[size*3], RyStream4, size4*sizeof(float), cudaMemcpyDeviceToHost, stream4);
+    cudaMemcpyAsync(&Rxhost[size*3], RxStream4, size*sizeof(float), cudaMemcpyDeviceToHost, stream4);
+    cudaMemcpyAsync(&Ryhost[size*3], RyStream4, size*sizeof(float), cudaMemcpyDeviceToHost, stream4);
+
+    cudaMemcpyAsync(&Rxhost[size*4], RxStream5, size*sizeof(float), cudaMemcpyDeviceToHost, stream5);
+    cudaMemcpyAsync(&Ryhost[size*4], RyStream5, size*sizeof(float), cudaMemcpyDeviceToHost, stream5);
+
+    cudaMemcpyAsync(&Rxhost[size*5], RxStream6, size4*sizeof(float), cudaMemcpyDeviceToHost, stream6);
+    cudaMemcpyAsync(&Ryhost[size*5], RyStream6, size4*sizeof(float), cudaMemcpyDeviceToHost, stream6);
 
     float *Rfinal= new float[Mout*Nout];
     float *Gfinal = new float[Mout*Nout];
@@ -404,7 +406,7 @@ int main(){
     //se convierte la imagen a blanco y negro
     float *Rhost, *Ghost, *Bhost;
     int M, N, Mout, Nout; //M filas, N columnas
-    Read(&Rhost, &Ghost, &Bhost, &M, &N, "imgG.txt"); 
+    Read(&Rhost, &Ghost, &Bhost, &M, &N, "mono.txt"); 
     blancoynegro(Rhost, Ghost, Bhost, M, N);
     Nout = N - 2;
 	Mout = M - 2;
