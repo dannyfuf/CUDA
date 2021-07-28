@@ -217,17 +217,18 @@ void callKernelFila(float * Rhost, int N, int M, int Mout, int Nout, int * k1, i
     cudaEventRecord(ct1);
 
     kernelFila<<<GS, BS>>>(Rdev, Rx, Ry, M, N, Mout, Nout, k1dev, k2dev);
-    cudaCheckError(4);
-    cudaEventRecord(ct2);
-    cudaEventSynchronize(ct2);
-    cudaEventElapsedTime(&dt, ct1, ct2);
-    cout << "Tiempo GPU una hebra por fila: " << dt << "[ms]" << endl;
+    // cudaCheckError(4);
 
     Rxhost = new float[Mout*Nout];
 	Ryhost = new float[Mout*Nout];
     cudaMemcpy(Rxhost, Rx, Mout * Nout * sizeof(float), cudaMemcpyDeviceToHost);
 	cudaMemcpy(Ryhost, Ry, Mout * Nout * sizeof(float), cudaMemcpyDeviceToHost);
-    cudaCheckError(5);
+    
+    cudaEventRecord(ct2);
+    cudaEventSynchronize(ct2);
+    cudaEventElapsedTime(&dt, ct1, ct2);
+    cout << "Tiempo GPU una hebra por fila: " << dt << "[ms]" << endl;
+    // cudaCheckError(5);
 
     float *Rfinal= new float[Mout*Nout];
     float *Gfinal = new float[Mout*Nout];
@@ -260,9 +261,6 @@ void callKernelConv(float * Rhost, int N, int M, int Mout, int Nout, int * k1, i
     
     int GS = (int)ceil((float) Mout*Nout / BS);
 
-    cudaMalloc((void**)&Rdev, M * N * sizeof(float));
-    //cudaMemcpy(Rdev, Rhost, M * N * sizeof(float), cudaMemcpyHostToDevice);
-    cudaMemcpy(Rdev, Rhost, M * N * sizeof(float), cudaMemcpyHostToDevice);
     cudaCheckError(1);
 
     cudaMalloc((void**)&k1dev, X * Y * sizeof(int));
@@ -278,13 +276,12 @@ void callKernelConv(float * Rhost, int N, int M, int Mout, int Nout, int * k1, i
     cudaEventCreate(&ct1);
     cudaEventCreate(&ct2);
     cudaEventRecord(ct1);
+    
+    cudaMalloc((void**)&Rdev, M * N * sizeof(float));
+    cudaMemcpy(Rdev, Rhost, M * N * sizeof(float), cudaMemcpyHostToDevice);
 
     kernelConvolucion<<<GS, BS>>>(Rdev, Rx, Ry, M, N, Mout, Nout, k1dev, k2dev);
     cudaCheckError(4);
-    cudaEventRecord(ct2);
-    cudaEventSynchronize(ct2);
-    cudaEventElapsedTime(&dt, ct1, ct2);
-    cout << "Tiempo GPU una hebra por convolucion: " << dt << "[ms]" << endl;
 
     Rxhost = new float[Mout*Nout];
 	Ryhost = new float[Mout*Nout];
@@ -292,6 +289,11 @@ void callKernelConv(float * Rhost, int N, int M, int Mout, int Nout, int * k1, i
 	cudaMemcpy(Ryhost, Ry, Mout * Nout * sizeof(float), cudaMemcpyDeviceToHost);
     cudaCheckError(5);
 
+    cudaEventRecord(ct2);
+    cudaEventSynchronize(ct2);
+    cudaEventElapsedTime(&dt, ct1, ct2);
+    cout << "Tiempo GPU una hebra por convolucion: " << dt << "[ms]" << endl;
+    
     float *Rfinal= new float[Mout*Nout];
     float *Gfinal = new float[Mout*Nout];
     float *Bfinal = new float[Mout*Nout];
@@ -342,56 +344,69 @@ void callKernelStream(float * Rhost, int N, int M, int Mout, int Nout, int * k1,
     cudaMalloc((void **)&RyStream6, size4 * sizeof(float));
     
 
-    // copiar la imagen completa a memoria de gpu
-    cudaMalloc((void **)&Rdev, M * N * sizeof(float));
-    cudaMemcpy(Rdev, Rhost, M * N * sizeof(float), cudaMemcpyHostToDevice);
 
     // copiar el kernel de convolucion a memoria de gpu
     cudaMalloc((void **)&k1dev, X * Y * sizeof(float));
     cudaMalloc((void **)&k2dev, X * Y * sizeof(float));
     cudaMemcpy(k1dev, k1, X * Y * sizeof(float), cudaMemcpyHostToDevice);
     cudaMemcpy(k2dev, k2, X * Y * sizeof(float), cudaMemcpyHostToDevice);
+    
+    float * RH;
+    cudaMallocHost((void **)&RH, M * N * sizeof(float));
+
+    for(int i = 0; i < M*N; i++){
+        RH[i] = Rhost[i];
+    }
+
+    cudaMalloc((void **)&Rdev, M * N * sizeof(float));
+
     cudaEventCreate(&ct1);
     cudaEventCreate(&ct2);
     cudaEventRecord(ct1);
     
+    // copiar la imagen completa a memoria de gpu
+    cudaMemcpyAsync(Rdev, RH, M * N * sizeof(float), cudaMemcpyHostToDevice, stream1);
+    cudaMemcpyAsync(Rdev, RH, M * N * sizeof(float), cudaMemcpyHostToDevice, stream2);
+    cudaMemcpyAsync(Rdev, RH, M * N * sizeof(float), cudaMemcpyHostToDevice, stream3);
+    cudaMemcpyAsync(Rdev, RH, M * N * sizeof(float), cudaMemcpyHostToDevice, stream4);
+
     //stream 1
     kernelStream<<<GS, BS, 0, stream1>>>(Rdev, RxStream1, RyStream1, M, N, Mout, Nout, k1dev, k2dev, size, 0);
+    cudaMemcpyAsync(&Rxhost[0], RxStream1, size*sizeof(float), cudaMemcpyDeviceToHost, stream1);
+    cudaMemcpyAsync(&Ryhost[0], RyStream1, size*sizeof(float), cudaMemcpyDeviceToHost, stream1);
+
     //stream 2
     kernelStream<<<GS, BS, 0, stream2>>>(Rdev, RxStream2, RyStream2, M, N, Mout, Nout, k1dev, k2dev, size, 1);
+    cudaMemcpyAsync(&Rxhost[size], RxStream2, size*sizeof(float), cudaMemcpyDeviceToHost, stream2);
+    cudaMemcpyAsync(&Ryhost[size], RyStream2, size*sizeof(float), cudaMemcpyDeviceToHost, stream2);
+
     //stream 3
     kernelStream<<<GS, BS, 0, stream3>>>(Rdev, RxStream3, RyStream3, M, N, Mout, Nout, k1dev, k2dev, size, 2);
+    cudaMemcpyAsync(&Rxhost[size*2], RxStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
+    cudaMemcpyAsync(&Ryhost[size*2], RyStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
+    
     //stream 4
     kernelStream<<<GS, BS, 0, stream4>>>(Rdev, RxStream4, RyStream4, M, N, Mout, Nout, k1dev, k2dev, size, 3);
+    cudaMemcpyAsync(&Rxhost[size*3], RxStream4, size*sizeof(float), cudaMemcpyDeviceToHost, stream4);
+    cudaMemcpyAsync(&Ryhost[size*3], RyStream4, size*sizeof(float), cudaMemcpyDeviceToHost, stream4);
+
     //stream 5
     kernelStream<<<GS, BS, 0, stream5>>>(Rdev, RxStream5, RyStream5, M, N, Mout, Nout, k1dev, k2dev, size, 4);
+    cudaMemcpyAsync(&Rxhost[size*4], RxStream5, size*sizeof(float), cudaMemcpyDeviceToHost, stream5);
+    cudaMemcpyAsync(&Ryhost[size*4], RyStream5, size*sizeof(float), cudaMemcpyDeviceToHost, stream5);
+
     //stream 6
     kernelStream<<<GS4, BS, 0, stream6>>>(Rdev, RxStream6, RyStream6, M, N, Mout, Nout, k1dev, k2dev, size4, 5);
-
-    cudaDeviceSynchronize();
+    cudaMemcpyAsync(&Rxhost[size*5], RxStream6, size4*sizeof(float), cudaMemcpyDeviceToHost, stream6);
+    cudaMemcpyAsync(&Ryhost[size*5], RyStream6, size4*sizeof(float), cudaMemcpyDeviceToHost, stream6);
 
     cudaEventRecord(ct2);
     cudaEventSynchronize(ct2);
     cudaEventElapsedTime(&dt, ct1, ct2);
 	printf("Tiempo GPU Streams: %f[ms]\n", dt);
 
-    cudaMemcpyAsync(&Rxhost[0], RxStream1, size*sizeof(float), cudaMemcpyDeviceToHost, stream1);
-    cudaMemcpyAsync(&Ryhost[0], RyStream1, size*sizeof(float), cudaMemcpyDeviceToHost, stream1);
+    cudaDeviceSynchronize();
 
-    cudaMemcpyAsync(&Rxhost[size], RxStream2, size*sizeof(float), cudaMemcpyDeviceToHost, stream2);
-    cudaMemcpyAsync(&Ryhost[size], RyStream2, size*sizeof(float), cudaMemcpyDeviceToHost, stream2);
-
-    cudaMemcpyAsync(&Rxhost[size*2], RxStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
-    cudaMemcpyAsync(&Ryhost[size*2], RyStream3, size*sizeof(float), cudaMemcpyDeviceToHost, stream3);
-    
-    cudaMemcpyAsync(&Rxhost[size*3], RxStream4, size*sizeof(float), cudaMemcpyDeviceToHost, stream4);
-    cudaMemcpyAsync(&Ryhost[size*3], RyStream4, size*sizeof(float), cudaMemcpyDeviceToHost, stream4);
-
-    cudaMemcpyAsync(&Rxhost[size*4], RxStream5, size*sizeof(float), cudaMemcpyDeviceToHost, stream5);
-    cudaMemcpyAsync(&Ryhost[size*4], RyStream5, size*sizeof(float), cudaMemcpyDeviceToHost, stream5);
-
-    cudaMemcpyAsync(&Rxhost[size*5], RxStream6, size4*sizeof(float), cudaMemcpyDeviceToHost, stream6);
-    cudaMemcpyAsync(&Ryhost[size*5], RyStream6, size4*sizeof(float), cudaMemcpyDeviceToHost, stream6);
 
     float *Rfinal= new float[Mout*Nout];
     float *Gfinal = new float[Mout*Nout];
@@ -420,7 +435,7 @@ int main(){
     // TXTtoRGB();
 
     // llamada a la implementación del kernel usando una hebra por fila. 
-    //callKernelFila(Rhost, N, M, Mout, Nout, k1, k2);
+    callKernelFila(Rhost, N, M, Mout, Nout, k1, k2);
     //TXTtoRGB();
 
     // llamada a la implementación del kernel usando una hebra por fila. 
@@ -429,7 +444,7 @@ int main(){
 
     // llamada al kernel usando streams y un kernel por calculo.
     callKernelStream(Rhost, N, M, Mout, Nout, k1, k2);
-    TXTtoRGB();
+    //TXTtoRGB();
 
     return 0;
 }
