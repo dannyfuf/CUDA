@@ -5,6 +5,7 @@
 #include <stdlib.h>
 #include <math.h>
 
+#include <fstream>
 #include <string>
 #include <sys/types.h>
 using namespace std;
@@ -32,6 +33,26 @@ int TXTtoRGB(){
     }
     else{
         cout << "Error al convertir el txt a imagen" << endl;
+        return 0;
+    }
+}
+
+// Funcion que ejecuta el comando de python para reconstruir la imagen en formato PNG
+// a formato txt.
+// Hay que cambiar PYTHON_COMMAND dependiendo de como se ejecuta el comando en el PC.
+
+int RGBtoTXT(){
+    if (PYTHON_COMMAND == 0){
+        cout << "Transformando Imagen..." << endl;
+        system("python IMGtoTXT.py < name.txt");
+        return 1;
+    }
+    else if(system("python3 IMGtoTXT.py < name.txt")){
+        cout << "Transformando Imagen..." << endl;
+        return 1;
+    }
+    else{
+        cout << "Error al transformar el txt a imagen" << endl;
         return 0;
     }
 }
@@ -71,8 +92,7 @@ void Write(float* R, float* G, float* B,
 /*
  *  Lectura Archivo txt
  */
-void Read(float** R, float** G, float** B, int *M, int *N, 
-	      const char *filename) {    
+void Read(float** R, float** G, float** B, int *M, int *N, const char *filename) {    
     FILE *fp;
     fp = fopen(filename, "r");
     fscanf(fp, "%d %d\n", M, N);
@@ -303,8 +323,8 @@ void callKernelConv(float * Rhost, int N, int M, int Mout, int Nout, int * k1, i
 void callKernelStream(float * Rhost, int N, int M, int Mout, int Nout, int * k1, int * k2){
     cudaStream_t streams[cantStream];
     float *Rdev, *Rxhost, *Ryhost, dt;
-    float *RxStream1, *RxStream2, *RxStream3, *RxStream4, *RxStream5, *RxStream6;
-    float *RyStream1, *RyStream2, *RyStream3, *RyStream4, *RyStream5, *RyStream6;
+    float *RxStream1;
+    float *RyStream1;
     cudaEvent_t ct1, ct2;
     int *k1dev, *k2dev;
 
@@ -316,7 +336,7 @@ void callKernelStream(float * Rhost, int N, int M, int Mout, int Nout, int * k1,
     int GS4 = (int)ceil((float) ((Mout+Mout%cantStream)/cantStream)*Nout / BS);
 
     int size = (int)(Mout/cantStream)*Nout;
-    int size4 = (int)((Mout/cantStream)+Mout%cantStream)*Nout;
+    // int size4 = (int)((Mout/cantStream)+Mout%cantStream)*Nout;   
 
     cudaMalloc((void **)&RxStream1, size*cantStream * sizeof(float));
     cudaMalloc((void **)&RyStream1, size*cantStream * sizeof(float));
@@ -335,9 +355,7 @@ void callKernelStream(float * Rhost, int N, int M, int Mout, int Nout, int * k1,
     }
 
     int sizeFull = (int)(M/cantStream)*N;
-    int sizeFull6 = (int)((M/cantStream)+M%cantStream)*N;
-    
-    float *Rdev2, *Rdev3, *Rdev4, *Rdev5, *Rdev6;
+    int sizeFullOut = (int)(Mout/cantStream)*Nout;
     
     cudaMalloc((void **)&Rdev, (sizeFull)* cantStream * sizeof(float));
 
@@ -347,12 +365,12 @@ void callKernelStream(float * Rhost, int N, int M, int Mout, int Nout, int * k1,
 
     for(int i = 0; i < cantStream; i++){
         cudaStreamCreate(&streams[i]);
-        cudaMemcpyAsync(Rdev+i*sizeFull, &RH[i*sizeFull], (sizeFull) * sizeof(float), cudaMemcpyHostToDevice, streams[i]);
+        cudaMemcpyAsync(&Rdev[i*sizeFull], &RH[i*sizeFull], (sizeFull) * sizeof(float), cudaMemcpyHostToDevice, streams[i]);
         kernelStream<<<GS, BS, 0, streams[i]>>>(Rdev+i*sizeFull, RxStream1+i*size, RyStream1+i*size, M, N, Mout, Nout, k1dev, k2dev, size);
-        cudaMemcpyAsync(&Rxhost[i*sizeFull], RxStream1+i*size, size*sizeof(float), cudaMemcpyDeviceToHost, streams[i]);
-        cudaMemcpyAsync(&Ryhost[i*sizeFull], RyStream1+i*size, size*sizeof(float), cudaMemcpyDeviceToHost, streams[i]);
+        cudaMemcpyAsync(&Rxhost[i*sizeFullOut], RxStream1+i*size, size*sizeof(float), cudaMemcpyDeviceToHost, streams[i]);
+        cudaMemcpyAsync(&Ryhost[i*sizeFullOut], RyStream1+i*size, size*sizeof(float), cudaMemcpyDeviceToHost, streams[i]);
     }
-    
+
     cudaEventRecord(ct2);
     cudaEventSynchronize(ct2);
     cudaEventElapsedTime(&dt, ct1, ct2);
@@ -374,26 +392,44 @@ int main(){
     //se convierte la imagen a blanco y negro
     float *Rhost, *Ghost, *Bhost;
     int M, N, Mout, Nout; //M filas, N columnas
-    Read(&Rhost, &Ghost, &Bhost, &M, &N, "imgG.txt"); 
+
+    ofstream file;
+    file.open("name.txt");
+
+    string name;
+    cout << "Ingrese el nombre de la foto sin la extension: ";
+    cin >> name;
+    file << name;
+    file.close();
+    RGBtoTXT();
+
+    name.append(".txt");
+
+    char Name[500];
+    for(int i = 0; i < name.size(); i++){
+        Name[i] = name[i];
+    }
+    Name[name.size()] = '\0';
+
+    Read(&Rhost, &Ghost, &Bhost, &M, &N, Name); 
     blancoynegro(Rhost, Ghost, Bhost, M, N);
     Nout = N - 2;
 	Mout = M - 2;
-    //probar esto
     
     int *k1{ new int[9]{ -1, 0, 1, -2, 0, 2, -1, 0, 1 } };
     int *k2{ new int[9]{ -1, -2, -1, 0, 0, 0, 1, 2, 1 } };
 
     // llamada a la implementacion de cpu
-    // callCPU(Rhost, N, M, Mout, Nout, k1, k2);
-    // TXTtoRGB();
+    callCPU(Rhost, N, M, Mout, Nout, k1, k2);
+    TXTtoRGB();
 
     // llamada a la implementación del kernel usando una hebra por fila. 
-    //callKernelFila(Rhost, N, M, Mout, Nout, k1, k2);
-    //TXTtoRGB();
+    callKernelFila(Rhost, N, M, Mout, Nout, k1, k2);
+    TXTtoRGB();
 
     // llamada a la implementación del kernel usando una hebra por fila. 
     callKernelConv(Rhost, N, M, Mout, Nout, k1, k2);
-    //TXTtoRGB();
+    TXTtoRGB();
 
     // llamada al kernel usando streams y un kernel por calculo.
     callKernelStream(Rhost, N, M, Mout, Nout, k1, k2);
